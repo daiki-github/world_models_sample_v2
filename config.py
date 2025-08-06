@@ -25,7 +25,7 @@ N_GAUSSIANS = 5
 MDNRNN_BATCH_SIZE = 16 # シーケンスをバッチにする
 MDNRNN_SEQ_LEN = 32    # 1つの学習で見るシーケンス長
 MDNRNN_LEARNING_RATE = 0.0003
-MDNRNN_EPOCHS = 50 # データセットのサイズに応じて調整
+MDNRNN_EPOCHS = 30 # データセットのサイズに応じて調整
 
 # --- Controller設定 ---
 CONTROLLER_PATH = f"{WEIGHTS_DIR}/controller.pth"

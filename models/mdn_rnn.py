@@ -29,6 +29,9 @@ class MDNRNN(nn.Module):
             mdn_params, [self.n_gaussians, self.n_gaussians * self.latent_dim, self.n_gaussians * self.latent_dim], dim=-1
         )
         
+        # log_sigmaが極端な値にならないように値を制限する
+        log_sigma = torch.clamp(log_sigma, min=-10.0, max=10.0)
+        
         # 活性化関数を適用
         pi = torch.softmax(pi_logits, dim=-1)
         sigma = torch.exp(log_sigma)
