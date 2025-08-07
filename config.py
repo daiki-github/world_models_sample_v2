@@ -14,7 +14,7 @@ DATA_CHUNK_SIZE = 100 # この行を追加: 100エピソード毎にファイル
 # --- VAE設定 ---
 VAE_PATH = f"{WEIGHTS_DIR}/vae.pth"
 LATENT_DIM = 32
-VAE_BATCH_SIZE = 1
+VAE_BATCH_SIZE = 256
 VAE_LEARNING_RATE = 0.0001
 VAE_EPOCHS = 30 # データセットのサイズに応じて調整
 
@@ -23,9 +23,9 @@ MDNRNN_PATH = f"{WEIGHTS_DIR}/mdn_rnn.pth"
 ACTION_DIM = 3 # CarRacing: [steering, gas, brake]
 HIDDEN_UNITS = 256
 N_GAUSSIANS = 5
-MDNRNN_BATCH_SIZE = 16 # シーケンスをバッチにする
+MDNRNN_BATCH_SIZE = 256 # シーケンスをバッチにする
 MDNRNN_SEQ_LEN = 32    # 1つの学習で見るシーケンス長
-MDNRNN_LEARNING_RATE = 0.001
+MDNRNN_LEARNING_RATE = 0.0003 # 学習率
 MDNRNN_EPOCHS = 50 # データセットのサイズに応じて調整
 
 # --- Controller設定 ---

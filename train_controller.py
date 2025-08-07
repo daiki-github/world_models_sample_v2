@@ -62,7 +62,7 @@ def run_train_controller():
     def rollout(params_vector):
         torch.nn.utils.vector_to_parameters(torch.tensor(params_vector, dtype=torch.float32, device=DEVICE), controller.parameters())
         controller.eval()
-        # 環境名を v2 に修正
+
         env = gymnasium.make("CarRacing-v3", continuous=True, render_mode=None)
         total_reward = 0.0
         with torch.no_grad():
@@ -98,8 +98,8 @@ def run_train_controller():
         env.close()
         return total_reward
 
-    n_params = sum(p.numel() for p in controller.parameters())
-    initial_params = torch.nn.utils.parameters_to_vector(controller.parameters()).detach().cpu().numpy()
+    # n_params = sum(p.numel() for p in controller.parameters())
+    # initial_params = torch.nn.utils.parameters_to_vector(controller.parameters()).detach().cpu().numpy()
     
     es = cma.CMAEvolutionStrategy(initial_params, CMA_SIGMA, {'popsize': CMA_POPULATION_SIZE})
     

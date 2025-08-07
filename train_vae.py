@@ -22,43 +22,29 @@ class VAEDataset(Dataset):
     """
     def __init__(self, data_dir):
         super().__init__()
-        self.data_dir = data_dir
-        self.file_list = sorted(glob.glob(os.path.join(self.data_dir, "series_data_part_*.npz")))
-        if not self.file_list:
-            raise FileNotFoundError(f"データファイルが {self.data_dir} に見つかりません。")
-
-        # 各ファイルに何個のサンプルが含まれているかを事前に計算しておく
-        self.chunk_lengths = [len(np.load(f)['observations']) for f in self.file_list]
-        self.cumulative_lengths = np.cumsum(self.chunk_lengths)
-        self.total_length = self.cumulative_lengths[-1]
+        processed_dir = os.path.join(data_dir, "processed_memmap")
         
-        # 最後に読み込んだチャンクをキャッシュして、ディスクI/Oを減らす
-        self.cache = {}
-        self.cached_chunk_index = -1
+        obs_path = os.path.join(processed_dir, 'observations.mmap')
+        actions_path = os.path.join(processed_dir, 'actions.npy')
+
+        if not os.path.exists(obs_path) or not os.path.exists(actions_path):
+             raise FileNotFoundError(f"前処理済みデータが {processed_dir} に見つかりません。preprocess_data.pyを先に実行してください。")
+
+        # actions.npyから全体の長さを取得
+        self.length = len(np.load(actions_path))
+        
+        # memmapファイルを開く（データはまだメモリに読み込まれない）
+        self.observations = np.memmap(obs_path, dtype=np.uint8, mode='r', shape=(self.length, 64, 64, 3))
 
     def __len__(self):
-        return self.total_length
+        return self.length
 
     def __getitem__(self, idx):
         # 与えられたインデックス(idx)が、どのファイルの何番目にあたるかを計算
-        chunk_index = np.searchsorted(self.cumulative_lengths, idx, side='right')
-        if chunk_index == 0:
-            index_in_chunk = idx
-        else:
-            index_in_chunk = idx - self.cumulative_lengths[chunk_index - 1]
-
-        # チャンクがキャッシュされていなければ、ディスクから読み込んでキャッシュする
-        if chunk_index != self.cached_chunk_index:
-            # print(f"チャンク {chunk_index} をロード中...") # デバッグ用
-            self.cache = np.load(self.file_list[chunk_index])
-            self.cached_chunk_index = chunk_index
-        
-        # キャッシュから画像データを取得
-        obs = self.cache['observations'][index_in_chunk]
+        obs = self.observations[idx]
         
         # 前処理
-        obs_resized = cv2.resize(obs, (64, 64))
-        obs_float = obs_resized.astype(np.float32) / 255.0
+        obs_float = obs.astype(np.float32) / 255.0
         obs_tensor = torch.from_numpy(obs_float).permute(2, 0, 1) # (H, W, C) -> (C, H, W)
         
         return obs_tensor
@@ -80,7 +66,7 @@ def run_train_vae():
     # --- ★★★ 修正ここまで ★★★ ---
     
     # DataLoaderは、このカスタムDatasetからバッチを賢く読み込んでくれる
-    dataloader = DataLoader(dataset, batch_size=VAE_BATCH_SIZE, shuffle=True, num_workers=0) # Windowsではnum_workers=0が安定
+    dataloader = DataLoader(dataset, batch_size=VAE_BATCH_SIZE, shuffle=True, num_workers=4) # Windowsではnum_workers=0が安定
     
     vae = VAE(latent_dim=LATENT_DIM).to(DEVICE)
     optimizer = optim.Adam(vae.parameters(), lr=VAE_LEARNING_RATE)
@@ -101,7 +87,7 @@ def run_train_vae():
         total_loss = 0
         pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{VAE_EPOCHS}")
         for obs_batch in pbar:
-            print(f"batch loade!!!")
+            # print(f"batch loade!!!")
             obs_batch = obs_batch.to(DEVICE) # DataLoaderが返すのは1つのテンソル
             optimizer.zero_grad()
             recon_batch, mu, logvar = vae(obs_batch)
