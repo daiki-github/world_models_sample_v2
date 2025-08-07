@@ -1,37 +1,44 @@
 # train_mdn_rnn.py
+import os
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
+
 import torch
 import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
-import os
 import cv2
 from tqdm import tqdm
+import glob # ★★★ globをインポート
 
-from config import (DEVICE, VAE_PATH, MDNRNN_PATH, SERIES_PATH, WEIGHTS_DIR,
+from config import (DEVICE, VAE_PATH, MDNRNN_PATH, DATA_DIR, WEIGHTS_DIR,
                     LATENT_DIM, ACTION_DIM, HIDDEN_UNITS, N_GAUSSIANS,
                     MDNRNN_BATCH_SIZE, MDNRNN_SEQ_LEN, MDNRNN_LEARNING_RATE, MDNRNN_EPOCHS)
 from models.vae import VAE
 from models.mdn_rnn import MDNRNN, mdn_loss_function
 
-def create_rnn_dataset(vae, data):
-    # (この関数の中身は変更なし)
-    obs_list = [cv2.resize(obs, (64, 64)) for obs in data['observations']]
+def create_rnn_dataset(vae, observations, actions, dones):
+    """ VAEで観測を潜在ベクトルに変換し、RNN用のデータセットを作成 """
+    print("観測データを潜在ベクトルにエンコードしています...")
+    # 前処理はtrain_vae.pyと同じロジック
+    obs_list = [cv2.resize(obs, (64, 64)) for obs in observations]
     obs_tensor = torch.from_numpy(np.array(obs_list)).float().permute(0, 3, 1, 2) / 255.0
     
     z_list = []
     with torch.no_grad():
         batch_size = 512
-        for i in tqdm(range(0, len(obs_tensor), batch_size), desc="観測データをエンコード中"):
+        for i in tqdm(range(0, len(obs_tensor), batch_size), desc="エンコード進捗"):
             obs_batch = obs_tensor[i:i+batch_size].to(DEVICE)
             mu, _ = vae.encode(obs_batch)
             z_list.append(mu.cpu())
     
     z = torch.cat(z_list, dim=0)
-    actions = torch.from_numpy(data['actions'])
-    dones = torch.from_numpy(data['dones'])
+    actions = torch.from_numpy(actions)
+    dones = torch.from_numpy(dones)
 
+    print("RNN用のシーケンスデータを作成しています...")
     sequences_z, sequences_a, sequences_z_next = [], [], []
-    for i in range(len(z) - MDNRNN_SEQ_LEN):
+    for i in tqdm(range(len(z) - MDNRNN_SEQ_LEN), desc="シーケンス作成進捗"):
+        # エピソードが途中で終わるシーケンスは除外
         if not dones[i : i + MDNRNN_SEQ_LEN].any():
             sequences_z.append(z[i : i + MDNRNN_SEQ_LEN])
             sequences_a.append(actions[i : i + MDNRNN_SEQ_LEN])
@@ -44,6 +51,28 @@ def run_train_rnn():
     if not os.path.exists(WEIGHTS_DIR):
         os.makedirs(WEIGHTS_DIR)
 
+    # --- ★★★ ここからデータ読み込み部分を全面的に修正 ★★★ ---
+    file_list = glob.glob(os.path.join(DATA_DIR, "series_data_part_*.npz"))
+    if not file_list:
+        print(f"データファイルが見つかりません: {DATA_DIR}。先に collect_data.py を実行してください。")
+        return
+
+    print(f"{len(file_list)} 個のデータチャンクを読み込んでいます...")
+    all_observations, all_actions, all_dones = [], [], []
+    for file in tqdm(file_list, desc="データチャンクをロード中"):
+        with np.load(file) as data:
+            all_observations.append(data['observations'])
+            all_actions.append(data['actions'])
+            all_dones.append(data['dones'])
+    
+    observations = np.concatenate(all_observations, axis=0)
+    actions = np.concatenate(all_actions, axis=0)
+    dones = np.concatenate(all_dones, axis=0)
+    print(f"データの読み込み完了。合計ステップ数: {len(observations)}")
+    # --- ★★★ データ読み込み部分の修正ここまで ★★★ ---
+
+
+    # --- VAEモデルのロード ---
     vae = VAE(latent_dim=LATENT_DIM).to(DEVICE)
     try:
         vae.load_state_dict(torch.load(VAE_PATH, map_location=DEVICE))
@@ -51,11 +80,15 @@ def run_train_rnn():
         print(f"VAEモデルが見つかりません: {VAE_PATH}。先に train_vae.py を実行してください。")
         return
     vae.eval()
-
-    data = np.load(SERIES_PATH)
-    dataset = create_rnn_dataset(vae, data)
-    dataloader = DataLoader(dataset, batch_size=MDNRNN_BATCH_SIZE, shuffle=True)
     
+    # --- データセットの準備 ---
+    dataset = create_rnn_dataset(vae, observations, actions, dones)
+    # メモリ解放
+    del observations, actions, dones, all_observations, all_actions, all_dones
+
+    dataloader = DataLoader(dataset, batch_size=MDNRNN_BATCH_SIZE, shuffle=True, num_workers=4)
+    
+    # --- MDN-RNNの初期化と学習ループ ---
     mdnrnn = MDNRNN(
         latent_dim=LATENT_DIM,
         action_dim=ACTION_DIM,
@@ -64,7 +97,19 @@ def run_train_rnn():
     ).to(DEVICE)
     optimizer = optim.Adam(mdnrnn.parameters(), lr=MDNRNN_LEARNING_RATE)
 
-    print("MDN-RNNの学習を開始します...")
+    # 既存の重みファイルがあればロードして学習を引き継ぐ
+    if os.path.exists(MDNRNN_PATH):
+        try:
+            mdnrnn.load_state_dict(torch.load(MDNRNN_PATH, map_location=DEVICE))
+            print(f"既存のMDN-RNNモデルをロードしました: {MDNRNN_PATH}")
+            print("学習を再開します...")
+        except Exception as e:
+            print(f"MDN-RNNモデルのロードに失敗しました: {e}")
+            print("新規に学習を開始します。")
+    else:
+        print("新規にMDN-RNNの学習を開始します。")
+
+    
     mdnrnn.train()
     for epoch in range(MDNRNN_EPOCHS):
         total_loss = 0
@@ -77,11 +122,9 @@ def run_train_rnn():
             pi, mu, sigma, _ = mdnrnn(z_batch, a_batch)
             loss = mdn_loss_function(z_next_batch, pi, mu, sigma)
             
-            # --- 修正点: lossがnanでない場合のみ逆伝播と更新を行う ---
             if not torch.isnan(loss) and not torch.isinf(loss):
                 loss.backward()
-                # --- 修正点: 勾配クリッピングを追加 ---
-                torch.nn.utils.clip_grad_norm_(mdnrnn.parameters(), 1.0) # 上限値1.0でクリッピング
+                torch.nn.utils.clip_grad_norm_(mdnrnn.parameters(), 1.0)
                 optimizer.step()
                 
                 total_loss += loss.item()
@@ -89,13 +132,11 @@ def run_train_rnn():
             else:
                 print("警告: 損失が nan または inf になりました。このバッチをスキップします。")
 
-        # 1エポックで一度も有効な学習がなければ、損失が0になる可能性を考慮
-        if len(dataloader) > 0 and total_loss != 0:
+        if len(pbar) > 0 and total_loss != 0:
             avg_loss = total_loss / len(pbar)
             print(f"Epoch {epoch+1}/{MDNRNN_EPOCHS}, 平均損失: {avg_loss:.4f}")
         else:
              print(f"Epoch {epoch+1}/{MDNRNN_EPOCHS}, 有効な学習ステップがありませんでした。")
-
 
     torch.save(mdnrnn.state_dict(), MDNRNN_PATH)
     print(f"学習済みMDN-RNNモデルが {MDNRNN_PATH} に保存されました。")

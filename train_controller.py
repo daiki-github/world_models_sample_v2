@@ -46,6 +46,19 @@ def run_train_controller():
     vae.eval()
     mdnrnn.eval()
 
+    # CMA-ESの初期パラメータを設定
+    # 既存のControllerの重みがあれば、それを初期値とする
+    if os.path.exists(CONTROLLER_PATH):
+        print(f"既存のControllerモデルをロードします: {CONTROLLER_PATH}")
+        print("この重みを初期値として、学習を再開（継続）します。")
+        initial_params_vector = torch.load(CONTROLLER_PATH, map_location=DEVICE)
+        torch.nn.utils.vector_to_parameters(initial_params_vector, controller.parameters())
+        initial_params = initial_params_vector.cpu().numpy()
+    else:
+        print("新規にControllerの学習を開始します。")
+        # 既存の重みがない場合は、ランダムな初期値から開始
+        initial_params = torch.nn.utils.parameters_to_vector(controller.parameters()).detach().cpu().numpy()
+    
     def rollout(params_vector):
         torch.nn.utils.vector_to_parameters(torch.tensor(params_vector, dtype=torch.float32, device=DEVICE), controller.parameters())
         controller.eval()

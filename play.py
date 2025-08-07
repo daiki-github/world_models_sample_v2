@@ -59,6 +59,7 @@ def play_game(num_episodes=5):
     # render_mode='human' でゲーム画面を表示
     env = gymnasium.make("CarRacing-v3", continuous=True, render_mode='human')
 
+    reward_ave = 0
     with torch.no_grad():
         for episode in range(num_episodes):
             print(f"\n--- エピソード {episode + 1} 開始 ---")
@@ -105,12 +106,14 @@ def play_game(num_episodes=5):
                     done = True
 
             print(f"エピソード {episode + 1} 終了: 総リワード = {total_reward:.2f}, ステップ数 = {time_steps}")
+            reward_ave += total_reward
             time.sleep(2) # 次のエピソードの前に少し待機
 
     env.close()
     print("\nプレイが完了しました。")
+    print(f"平均合計報酬 {reward_ave / num_episodes:.2f}")
 
 
 if __name__ == "__main__":
     # 5回ゲームをプレイする
-    play_game(num_episodes=5)
+    play_game(num_episodes=10)
