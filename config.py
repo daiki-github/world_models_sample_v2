@@ -8,7 +8,7 @@ WEIGHTS_DIR = "weights"
 SERIES_PATH = f"{DATA_DIR}/series_data.npz"
 
 # --- データ収集設定 ---
-COLLECT_EPISODES = 1000 # 収集するエピソード数
+COLLECT_EPISODES = 4500 # 収集するエピソード数
 DATA_CHUNK_SIZE = 100 # この行を追加: 100エピソード毎にファイルを保存する
 
 # --- VAE設定 ---

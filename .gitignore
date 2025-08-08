@@ -3,3 +3,7 @@ data/
 __pycache__
 
 weights
+
+future_prediction_comparison.mp4
+
+vae_reconstruction_result.png
